@@ -1,23 +1,24 @@
 const moment = require("moment-timezone");
+const fonts = require('../../func/font.js'); // Importation du module de polices
 
 module.exports = {
   config: {
     name: "accept",
     aliases: ['acp'],
     version: "1.0",
-    author: "Loid Butter",
-    countDown: 8,
-    role: 2,
-    shortDescription: "accept users",
-    longDescription: "accept users",
+    author: "Christus",
+    countDown: 15,
+    role: 0,
+    shortDescription: "Accept or delete friend requests",
+    longDescription: "View and manage incoming friend requests with stylish formatting",
     category: "Utility",
   },
 
   onReply: async function ({ message, Reply, event, api, commandName }) {
     const { author, listRequest, messageID } = Reply;
     if (author !== event.senderID) return;
+    const args = event.body.replace(/ +/g, " ").toLowerCase().split(" ");
 
-    const args = event.body.trim().toLowerCase().split(" ");
     clearTimeout(Reply.unsendTimeout);
 
     const form = {
@@ -27,7 +28,7 @@ module.exports = {
         input: {
           source: "friends_tab",
           actor_id: api.getCurrentUserID(),
-          client_mutation_id: Math.random().toString(36).substring(2, 15)
+          client_mutation_id: Math.round(Math.random() * 19).toString()
         },
         scale: 3,
         refresh_num: 0
@@ -40,64 +41,64 @@ module.exports = {
     if (args[0] === "add") {
       form.fb_api_req_friendly_name = "FriendingCometFriendRequestConfirmMutation";
       form.doc_id = "3147613905362928";
-    } else if (args[0] === "del") {
+    }
+    else if (args[0] === "del") {
       form.fb_api_req_friendly_name = "FriendingCometFriendRequestDeleteMutation";
       form.doc_id = "4108254489275063";
-    } else {
-      return api.sendMessage("Please select <add | del> <number | all>", event.threadID, event.messageID);
+    }
+    else {
+      return api.sendMessage(`⚠️ ${fonts.bold("Invalid Syntax")}\n${fonts.sansSerif("Please use:")} ${fonts.monospace("add/del <number/all>")}`, event.threadID, event.messageID);
     }
 
-    let targetIDs = args[1] === "all" ? listRequest.map((_, idx) => idx + 1) : args.slice(1);
+    let targetIDs = args.slice(1);
+    if (args[1] === "all") {
+      targetIDs = [];
+      const lengthList = listRequest.length;
+      for (let i = 1; i <= lengthList; i++) targetIDs.push(i);
+    }
+
+    const newTargetIDs = [];
     const promiseFriends = [];
 
     for (const stt of targetIDs) {
-      const index = parseInt(stt) - 1;
-      const user = listRequest[index];
-
-      if (!user) {
-        failed.push(`Can't find target ${stt}`);
+      const u = listRequest[parseInt(stt) - 1];
+      if (!u) {
+        failed.push(`${fonts.italic("STT " + stt + " not found")}`);
         continue;
       }
-
-      form.variables.input.friend_requester_id = user.node.id;
-      promiseFriends.push(api.httpPost("https://www.facebook.com/api/graphql/", {
-        ...form,
-        variables: JSON.stringify(form.variables)
-      }));
-
-      success.push({ name: user.node.name, id: user.node.id });
+      form.variables.input.friend_requester_id = u.node.id;
+      form.variables = JSON.stringify(form.variables);
+      newTargetIDs.push(u);
+      promiseFriends.push(api.httpPost("https://www.facebook.com/api/graphql/", form));
+      form.variables = JSON.parse(form.variables);
     }
 
-    const finalSuccess = [];
-    const finalFailed = [];
-
-    for (let i = 0; i < promiseFriends.length; i++) {
+    const lengthTarget = newTargetIDs.length;
+    for (let i = 0; i < lengthTarget; i++) {
       try {
-        const res = await promiseFriends[i];
-        const data = JSON.parse(res);
-        if (data.errors) {
-          finalFailed.push(success[i].name);
+        const friendRequest = await promiseFriends[i];
+        if (JSON.parse(friendRequest).errors) {
+          failed.push(newTargetIDs[i].node.name);
         } else {
-          finalSuccess.push(success[i].name);
+          success.push(newTargetIDs[i].node.name);
         }
-      } catch {
-        finalFailed.push(success[i].name);
+      } catch (e) {
+        failed.push(newTargetIDs[i].node.name);
       }
     }
 
-    let resultMsg = "";
-    if (finalSuccess.length) {
-      resultMsg += `✅ ${args[0] === "add" ? "Accepted" : "Deleted"}: ${finalSuccess.length} user(s)\n${finalSuccess.join("\n")}`;
+    let resultMsg = `✨ ${fonts.bold("REQUEST PROCESSED")}\n${"━".repeat(15)}\n`;
+    if (success.length > 0) {
+      resultMsg += `✅ ${fonts.sansSerif("Successfully " + (args[0] === 'add' ? 'accepted' : 'deleted') + ":")}\n`;
+      resultMsg += success.map(name => `┣ ${fonts.fancy(name)}`).join("\n") + "\n\n";
     }
-    if (finalFailed.length) {
-      resultMsg += `\n❌ Failed: ${finalFailed.length} user(s)\n${finalFailed.join("\n")}`;
-    }
-    if (!resultMsg) {
-      resultMsg = "No users were processed.";
+    if (failed.length > 0) {
+      resultMsg += `❌ ${fonts.sansSerif("Failed/Errors:")}\n`;
+      resultMsg += failed.map(name => `┗ ${fonts.italic(name)}`).join("\n");
     }
 
+    api.sendMessage(resultMsg, event.threadID, event.messageID);
     api.unsendMessage(messageID);
-    return api.sendMessage(resultMsg, event.threadID);
   },
 
   onStart: async function ({ event, api, commandName }) {
@@ -111,39 +112,39 @@ module.exports = {
 
     try {
       const response = await api.httpPost("https://www.facebook.com/api/graphql/", form);
-      const listRequest = JSON.parse(response)?.data?.viewer?.friending_possibilities?.edges || [];
-
+      const listRequest = JSON.parse(response).data.viewer.friending_possibilities.edges;
+      
       if (listRequest.length === 0) {
-        return api.sendMessage("No pending friend requests found.", event.threadID);
+        return api.sendMessage(`📭 ${fonts.sansSerif("You have no pending friend requests.")}`, event.threadID);
       }
 
-      let msg = "";
-      listRequest.forEach((user, i) => {
-        msg += `\n${i + 1}. Name: ${user.node.name}`
-          + `\nID: ${user.node.id}`
-          + `\nURL: ${user.node.url.replace("www.facebook", "fb")}`
-          + `\nTime: ${moment().tz("Asia/Manila").format("DD/MM/YYYY HH:mm:ss")}\n`;
-      });
+      let msg = `📥 ${fonts.bold("FRIEND REQUEST LIST")}\n${"━".repeat(15)}\n`;
+      let i = 0;
+      for (const user of listRequest) {
+        i++;
+        const timeStr = moment(user.time * 1000).tz("Asia/Manila").format("DD/MM/YYYY HH:mm");
+        msg += `${fonts.bold(i + ".")} ${fonts.fancy(user.node.name)}\n`
+          + `🆔 ${fonts.monospace(user.node.id)}\n`
+          + `📅 ${fonts.sansSerif("Time:")} ${fonts.monospace(timeStr)}\n`
+          + `${"━".repeat(10)}\n`;
+      }
 
-      api.sendMessage(
-        `${msg}\nReply to this message with: <add | del> <number | all>`,
-        event.threadID,
-        (e, info) => {
-          global.GoatBot.onReply.set(info.messageID, {
-            commandName,
-            messageID: info.messageID,
-            listRequest,
-            author: event.senderID,
-            unsendTimeout: setTimeout(() => {
-              api.unsendMessage(info.messageID);
-            }, this.config.countDown * 1000)
-          });
-        },
-        event.messageID
-      );
-    } catch (error) {
-      console.error(error);
-      api.sendMessage("Error retrieving friend request list.", event.threadID);
+      msg += `\n💡 ${fonts.italic("Reply: <add/del> <number/all>")}`;
+
+      api.sendMessage(msg, event.threadID, (e, info) => {
+        global.GoatBot.onReply.set(info.messageID, {
+          commandName,
+          messageID: info.messageID,
+          listRequest,
+          author: event.senderID,
+          unsendTimeout: setTimeout(() => {
+            api.unsendMessage(info.messageID);
+          }, this.config.countDown * 1000)
+        });
+      }, event.messageID);
+
+    } catch (err) {
+      api.sendMessage("❌ Error fetching requests.", event.threadID);
     }
   }
 };
